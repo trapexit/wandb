@@ -23,7 +23,9 @@
 -module(wandb_import).
 
 -export([zip/2,
-         zip/3]).
+         zip/3,
+         escript/3,
+         files/4]).
 
 zip(DB,Archive) ->
     MatchFun = fun(_) -> true end,
@@ -42,10 +44,28 @@ zip(DB,Archive,RE)
 zip(DB,Archive,Prefix) ->
     MatchFun = fun(FilePath) -> prefixof(Prefix,FilePath) end,
     Fun = zip_importer_fun(MatchFun),
-    {ok,NewDB} = zip:foldl(Fun,DB,Archive),
+    {ok,NewDB} = zip:foldl(Fun,DB,{"",Archive}),
     NewDB.
 
+escript(DB,Escript,Prefix)
+  when is_list(Escript) ->
+    {ok,Archive} = escript:parse_file(Escript),
+    zip(DB,Archive,Prefix).
+
+files(DB,Dir,RegExp,Recursive) ->
+    Fun = files_importer_fun(Dir),
+    filelib:fold_files(Dir,RegExp,Recursive,Fun,DB).
+
 %% Private
+files_importer_fun(Dir) ->
+    fun(Filename,DB) ->
+            Key = strip(Dir,Filename),
+            FileInfo = file:read_file_info(Filename),
+            NewDB = wandb_build:insert(DB,info,Key,FileInfo),
+            {ok,Data} = file:read_file(Filename),
+            wandb_build:insert(NewDB,data,Key,Data)
+    end.
+
 zip_importer_fun(MatchFun) ->
     fun(FilePath,GetInfo,GetBin,Acc) ->
             case MatchFun(FilePath) of
@@ -56,6 +76,13 @@ zip_importer_fun(MatchFun) ->
                     Acc
             end
     end.
+
+strip([H|PreT],[H|StrT]) ->
+    strip(PreT,StrT);
+strip([],Str) ->
+    Str;
+strip(_,[]) ->
+    [].
 
 prefixof([H|PreT],[H|StrT]) ->
     prefixof(PreT,StrT);
